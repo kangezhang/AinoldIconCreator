@@ -54,7 +54,8 @@
     },
     "files": [
       "dist",
-      "package.json"
+      "package.json",
+      "assets"
     ],
     "asarUnpack": [
       "node_modules/sharp/**/*",
@@ -64,7 +65,7 @@
       "target": [
         "nsis"
       ],
-      "icon": "build/icon.ico"
+      "icon": "assets/icon.ico"
     },
     "mac": {
       "target": [

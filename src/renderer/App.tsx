@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
-import { RotateCcw, Download, Upload, Scissors, Loader2, Pipette } from 'lucide-react';
-import ImageCropper from './components/ImageCropper';
+import React, { useState, useRef, useEffect } from 'react';
+import { Download, Upload, Eraser, Loader2, Pipette, Check, Crop } from 'lucide-react';
+import ImageCropper, { type ImageCropperHandle } from './components/ImageCropper';
 import type { RgbColor } from './types';
 
 function App() {
@@ -12,7 +12,11 @@ function App() {
   const [isPickingColor, setIsPickingColor] = useState(false);
   const [selectedColor, setSelectedColor] = useState<RgbColor | null>(null);
   const [tolerance, setTolerance] = useState(40);
+  const [isCropPending, setIsCropPending] = useState(false);
+  const [applyCropToImage, setApplyCropToImage] = useState(false);
+  const [isCropping, setIsCropping] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cropperRef = useRef<ImageCropperHandle>(null);
 
   const handleImageSelect = (imageData: string) => {
     setImage(imageData);
@@ -20,11 +24,20 @@ function App() {
     setBgRemovedImage(null);
     setSelectedColor(null);
     setIsPickingColor(false);
+    setIsCropPending(false);
+    setApplyCropToImage(false);
+    setIsCropping(true);
   };
 
   const handleCropComplete = (croppedData: string) => {
     setCroppedImage(croppedData);
     setBgRemovedImage(null);
+    if (applyCropToImage) {
+      setImage(`data:image/png;base64,${croppedData}`);
+      setApplyCropToImage(false);
+      setIsCropping(false);
+      setIsCropPending(false);
+    }
   };
 
   const handleColorPick = (color: RgbColor) => {
@@ -34,6 +47,17 @@ function App() {
 
   const handlePickImage = () => {
     fileInputRef.current?.click();
+  };
+
+  const handleApplyCrop = () => {
+    if (!image) return;
+    if (!isCropping) {
+      setIsCropping(true);
+      return;
+    }
+    if (!isCropPending) return;
+    setApplyCropToImage(true);
+    cropperRef.current?.applyCrop();
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -114,13 +138,36 @@ function App() {
     }
   };
 
-  const handleReset = () => {
-    setImage(null);
-    setCroppedImage(null);
-    setBgRemovedImage(null);
-    setSelectedColor(null);
-    setIsPickingColor(false);
-  };
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!image) return;
+      const target = event.target as HTMLElement | null;
+      const isEditable =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable);
+      if (isEditable) return;
+
+      if (event.key === 'Enter') {
+        if (!isCropping || !isCropPending) return;
+        event.preventDefault();
+        setApplyCropToImage(true);
+        cropperRef.current?.applyCrop();
+      }
+
+      if (event.key === 'Escape') {
+        if (!isCropping) return;
+        event.preventDefault();
+        setIsCropping(false);
+        setIsCropPending(false);
+        setApplyCropToImage(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [image, isCropping, isCropPending]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-6">
@@ -134,6 +181,9 @@ function App() {
                 onCropComplete={handleCropComplete}
                 isPickingColor={isPickingColor}
                 onColorPick={handleColorPick}
+                onPendingChange={setIsCropPending}
+                isCropping={isCropping}
+                ref={cropperRef}
               />
             ) : (
               <div className="checkerboard border border-gray-300 rounded w-full max-w-[500px] aspect-square" />
@@ -155,13 +205,23 @@ function App() {
                 <Upload size={18} />
               </button>
               <button
-                onClick={handleReset}
-                disabled={!image}
-                aria-label="Reset selection"
-                title="Reset selection"
-                className="flex items-center justify-center w-11 h-11 bg-white hover:bg-gray-100 border border-gray-300 rounded-full transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleApplyCrop}
+                disabled={!image || (isCropping && !isCropPending)}
+                aria-label={isCropping ? 'Apply crop' : 'Enter crop mode'}
+                title={
+                  !image
+                    ? 'Select image'
+                    : !isCropping
+                      ? 'Enter crop mode (Esc to exit)'
+                      : isCropPending
+                        ? 'Apply crop (Enter)'
+                        : 'Adjust selection or press Esc to exit'
+                }
+                className={`flex items-center justify-center w-11 h-11 bg-white hover:bg-gray-100 border border-gray-300 rounded-full transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
+                  isCropPending ? 'ring-2 ring-indigo-400' : ''
+                }`}
               >
-                <RotateCcw size={18} />
+                {isCropping ? <Check size={18} /> : <Crop size={18} />}
               </button>
               <button
                 onClick={() => setIsPickingColor((prev) => !prev)}
@@ -190,14 +250,14 @@ function App() {
               <button
                 onClick={handleRemoveColor}
                 disabled={!croppedImage || isRemovingBg}
-                aria-label="Remove color"
-                title="Remove color"
+                aria-label="Remove background color"
+                title="Remove background color"
                 className="flex items-center justify-center w-11 h-11 bg-white hover:bg-gray-100 border border-gray-300 rounded-full transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isRemovingBg ? (
                   <Loader2 size={18} className="animate-spin" />
                 ) : (
-                  <Scissors size={18} />
+                  <Eraser size={18} />
                 )}
               </button>
               <button

@@ -8,6 +8,11 @@ import { logError, logInfo } from './logger';
 
 let mainWindow: any = null;
 
+function getAppIconPath() {
+  const appPath = app.getAppPath();
+  return path.join(appPath, 'assets', 'icon.ico');
+}
+
 function resolvePreloadPath() {
   const candidates = [
     path.join(__dirname, '../preload/preload.js'),
@@ -25,11 +30,16 @@ function resolvePreloadPath() {
 }
 
 function createWindow() {
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.ainold.iconcreator');
+  }
+
   mainWindow = new BrowserWindow({
     width: 800,
     height: 700,
     minWidth: 700,
     minHeight: 600,
+    icon: process.platform === 'win32' ? getAppIconPath() : undefined,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

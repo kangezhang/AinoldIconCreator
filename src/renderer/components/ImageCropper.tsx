@@ -1,20 +1,35 @@
-import React, { useState, useRef, useEffect } from 'react';
+﻿import React, {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useImperativeHandle,
+  forwardRef
+} from 'react';
 
 interface ImageCropperProps {
   image: string;
   onCropComplete: (croppedImage: string) => void;
   isPickingColor?: boolean;
   onColorPick?: (color: { r: number; g: number; b: number }) => void;
+  onPendingChange?: (pending: boolean) => void;
+  isCropping?: boolean;
 }
 
 type DragMode = 'move' | 'resize' | null;
 
-const ImageCropper: React.FC<ImageCropperProps> = ({
+export interface ImageCropperHandle {
+  applyCrop: () => void;
+}
+
+const ImageCropper = forwardRef<ImageCropperHandle, ImageCropperProps>(({
   image,
   onCropComplete,
   isPickingColor = false,
-  onColorPick
-}) => {
+  onColorPick,
+  onPendingChange,
+  isCropping = true
+}, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [crop, setCrop] = useState({ x: 0, y: 0, width: 0, height: 0 });
@@ -24,9 +39,13 @@ const ImageCropper: React.FC<ImageCropperProps> = ({
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
   const imgRef = useRef<HTMLImageElement>(new Image());
 
+  const updatePending = useCallback((pending: boolean) => {
+    onPendingChange?.(pending);
+  }, [onPendingChange]);
+
   useEffect(() => {
     const img = imgRef.current;
-    img.crossOrigin = 'anonymous'; // 允许读取图片数据
+    img.crossOrigin = 'anonymous'; // 鍏佽璇诲彇鍥剧墖鏁版嵁
     img.src = image;
     img.onload = () => {
       const canvas = canvasRef.current;
@@ -35,7 +54,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({
       const ctx = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
       if (!ctx) return;
 
-      // 计算适应容器的尺寸
+      // 璁＄畻閫傚簲瀹瑰櫒鐨勫昂瀵?
       const maxWidth = 500;
       const maxHeight = 500;
       let width = img.width;
@@ -51,7 +70,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({
       canvas.height = height;
       setImageSize({ width, height });
 
-      // 调试：测试图片本身是否有透明通道
+      // 璋冭瘯锛氭祴璇曞浘鐗囨湰韬槸鍚︽湁閫忔槑閫氶亾
       const testCanvas = document.createElement('canvas');
       testCanvas.width = img.width;
       testCanvas.height = img.height;
@@ -66,12 +85,13 @@ const ImageCropper: React.FC<ImageCropperProps> = ({
         console.log(`[Image Load] Transparent pixels in original image: ${transparentCount} / ${img.width * img.height} (${(transparentCount / (img.width * img.height) * 100).toFixed(2)}%)`);
       }
 
-      // 初始化裁剪区域为正方形
+      // 鍒濆鍖栬鍓尯鍩熶负姝ｆ柟褰?
       const size = Math.min(width, height);
       const x = (width - size) / 2;
       const y = (height - size) / 2;
       const initialCrop = { x, y, width: size, height: size };
       setCrop(initialCrop);
+      updatePending(false);
 
       if (!sampleCanvasRef.current) {
         sampleCanvasRef.current = document.createElement('canvas');
@@ -85,24 +105,40 @@ const ImageCropper: React.FC<ImageCropperProps> = ({
         sampleCtx.drawImage(img, 0, 0, img.width, img.height);
       }
 
-      drawCanvas(ctx, img, initialCrop, width, height);
+      drawCanvas(ctx, img, initialCrop, width, height, isCropping);
       performCrop(initialCrop, { width, height });
     };
-  }, [image]);
+  }, [image, updatePending]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !imageSize.width || !imageSize.height) return;
+    const ctx = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
+    if (!ctx) return;
+    drawCanvas(ctx, imgRef.current, crop, imageSize.width, imageSize.height, isCropping);
+    if (!isCropping) {
+      updatePending(false);
+      canvas.style.cursor = 'default';
+    }
+  }, [isCropping, imageSize.width, imageSize.height, updatePending]);
 
   const drawCanvas = (
     ctx: CanvasRenderingContext2D,
     img: HTMLImageElement,
     cropArea: { x: number; y: number; width: number; height: number },
     canvasWidth: number,
-    canvasHeight: number
+    canvasHeight: number,
+    showOverlay: boolean
   ) => {
     ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-    // 先绘制整张图片（包含透明通道）
+    // 鍏堢粯鍒舵暣寮犲浘鐗囷紙鍖呭惈閫忔槑閫氶亾锛?
     ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
+    if (!showOverlay) {
+      return;
+    }
 
-    // 调试：检查图片是否有透明像素
+    // 璋冭瘯锛氭鏌ュ浘鐗囨槸鍚︽湁閫忔槑鍍忕礌
     const imageData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
     let transparentCount = 0;
     for (let i = 3; i < imageData.data.length; i += 4) {
@@ -110,14 +146,14 @@ const ImageCropper: React.FC<ImageCropperProps> = ({
     }
     console.log(`Transparent pixels: ${transparentCount} / ${canvasWidth * canvasHeight} (${(transparentCount / (canvasWidth * canvasHeight) * 100).toFixed(2)}%)`);
 
-    // 在裁剪区域外绘制半透明黑色遮罩
+    // 鍦ㄨ鍓尯鍩熷缁樺埗鍗婇€忔槑榛戣壊閬僵
     ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.fillRect(0, 0, canvasWidth, canvasHeight);
     ctx.clearRect(cropArea.x, cropArea.y, cropArea.width, cropArea.height);
     ctx.restore();
 
-    // 在裁剪区域内绘制棋盘格背景（显示透明度）
+    // 鍦ㄨ鍓尯鍩熷唴缁樺埗妫嬬洏鏍艰儗鏅紙鏄剧ず閫忔槑搴︼級
     ctx.save();
     ctx.globalCompositeOperation = 'destination-over';
     const tile = 16;
@@ -135,7 +171,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({
     }
     ctx.restore();
 
-    // 重新绘制裁剪区域的图片（在棋盘格上方）
+    // 閲嶆柊缁樺埗瑁佸壀鍖哄煙鐨勫浘鐗囷紙鍦ㄦ鐩樻牸涓婃柟锛?
     ctx.drawImage(
       img,
       (cropArea.x / canvasWidth) * img.width,
@@ -148,7 +184,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({
       cropArea.height
     );
 
-    // 绘制裁剪框
+    // 缁樺埗瑁佸壀妗?
     ctx.strokeStyle = '#4F46E5';
     ctx.lineWidth = 2;
     ctx.strokeRect(cropArea.x, cropArea.y, cropArea.width, cropArea.height);
@@ -205,6 +241,9 @@ const ImageCropper: React.FC<ImageCropperProps> = ({
       }
       return;
     }
+    if (!isCropping) {
+      return;
+    }
 
     if (isNearEdge(x, y)) {
       setDragMode('resize');
@@ -226,9 +265,13 @@ const ImageCropper: React.FC<ImageCropperProps> = ({
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // 更新鼠标样式
+    // 鏇存柊榧犳爣鏍峰紡
     if (isPickingColor) {
       canvas.style.cursor = 'crosshair';
+      return;
+    }
+    if (!isCropping) {
+      canvas.style.cursor = 'default';
       return;
     }
 
@@ -249,28 +292,28 @@ const ImageCropper: React.FC<ImageCropperProps> = ({
     let newCrop = { ...crop };
 
     if (dragMode === 'move') {
-      // 移动裁剪框
+      // 绉诲姩瑁佸壀妗?
       newCrop.x = cropStart.x + deltaX;
       newCrop.y = cropStart.y + deltaY;
 
-      // 边界检查
+      // 杈圭晫妫€鏌?
       newCrop.x = Math.max(0, Math.min(imageSize.width - crop.width, newCrop.x));
       newCrop.y = Math.max(0, Math.min(imageSize.height - crop.height, newCrop.y));
     } else if (dragMode === 'resize') {
-      // 调整大小（保持正方形）
+      // 璋冩暣澶у皬锛堜繚鎸佹鏂瑰舰锛?
       const delta = Math.max(deltaX, deltaY);
       let newSize = cropStart.width + delta;
 
-      // 限制最小和最大尺寸
+      // 闄愬埗鏈€灏忓拰鏈€澶у昂瀵?
       const minSize = 50;
       const maxSize = Math.min(imageSize.width, imageSize.height);
       newSize = Math.max(minSize, Math.min(maxSize, newSize));
 
-      // 保持左上角位置不变
+      // 淇濇寔宸︿笂瑙掍綅缃笉鍙?
       newCrop.width = newSize;
       newCrop.height = newSize;
 
-      // 边界检查
+      // 杈圭晫妫€鏌?
       if (newCrop.x + newCrop.width > imageSize.width) {
         newCrop.width = imageSize.width - newCrop.x;
         newCrop.height = newCrop.width;
@@ -282,17 +325,17 @@ const ImageCropper: React.FC<ImageCropperProps> = ({
     }
 
     setCrop(newCrop);
+    updatePending(true);
 
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      drawCanvas(ctx, imgRef.current, newCrop, imageSize.width, imageSize.height);
+      drawCanvas(ctx, imgRef.current, newCrop, imageSize.width, imageSize.height, isCropping);
     }
   };
 
   const handleMouseUp = () => {
     if (dragMode) {
       setDragMode(null);
-      performCrop();
     }
   };
 
@@ -304,19 +347,19 @@ const ImageCropper: React.FC<ImageCropperProps> = ({
     const img = imgRef.current;
     if (!canvas || !img) return;
 
-    // 创建临时画布进行裁剪
+    // 鍒涘缓涓存椂鐢诲竷杩涜瑁佸壀
     const tempCanvas = document.createElement('canvas');
-    const size = 1024; // 输出固定尺寸
+    const size = 1024; // 杈撳嚭鍥哄畾灏哄
     tempCanvas.width = size;
     tempCanvas.height = size;
 
     const ctx = tempCanvas.getContext('2d');
     if (!ctx) return;
 
-    // 清除画布，确保透明背景
+    // 娓呴櫎鐢诲竷锛岀‘淇濋€忔槑鑳屾櫙
     ctx.clearRect(0, 0, size, size);
 
-    // 计算原图中的裁剪区域
+    // 璁＄畻鍘熷浘涓殑瑁佸壀鍖哄煙
     const scaleX = img.width / canvasSize.width;
     const scaleY = img.height / canvasSize.height;
 
@@ -336,6 +379,14 @@ const ImageCropper: React.FC<ImageCropperProps> = ({
     onCropComplete(croppedData.split(',')[1]);
   };
 
+  const applyCrop = useCallback(() => {
+    if (!imageSize.width || !imageSize.height) return;
+    performCrop(crop, imageSize);
+    updatePending(false);
+  }, [crop, imageSize, updatePending]);
+
+  useImperativeHandle(ref, () => ({ applyCrop }), [applyCrop]);
+
   return (
     <div className="flex flex-col items-center">
       <canvas
@@ -348,6 +399,6 @@ const ImageCropper: React.FC<ImageCropperProps> = ({
       />
     </div>
   );
-};
+});
 
 export default ImageCropper;
