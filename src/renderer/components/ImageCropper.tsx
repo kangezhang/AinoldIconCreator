@@ -3,12 +3,20 @@ import React, { useState, useRef, useEffect } from 'react';
 interface ImageCropperProps {
   image: string;
   onCropComplete: (croppedImage: string) => void;
+  isPickingColor?: boolean;
+  onColorPick?: (color: { r: number; g: number; b: number }) => void;
 }
 
 type DragMode = 'move' | 'resize' | null;
 
-const ImageCropper: React.FC<ImageCropperProps> = ({ image, onCropComplete }) => {
+const ImageCropper: React.FC<ImageCropperProps> = ({
+  image,
+  onCropComplete,
+  isPickingColor = false,
+  onColorPick
+}) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [crop, setCrop] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [dragMode, setDragMode] = useState<DragMode>(null);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
@@ -18,12 +26,13 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ image, onCropComplete }) =>
 
   useEffect(() => {
     const img = imgRef.current;
+    img.crossOrigin = 'anonymous'; // 允许读取图片数据
     img.src = image;
     img.onload = () => {
       const canvas = canvasRef.current;
       if (!canvas) return;
 
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { alpha: true, willReadFrequently: true });
       if (!ctx) return;
 
       // 计算适应容器的尺寸
@@ -42,13 +51,42 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ image, onCropComplete }) =>
       canvas.height = height;
       setImageSize({ width, height });
 
+      // 调试：测试图片本身是否有透明通道
+      const testCanvas = document.createElement('canvas');
+      testCanvas.width = img.width;
+      testCanvas.height = img.height;
+      const testCtx = testCanvas.getContext('2d', { alpha: true });
+      if (testCtx) {
+        testCtx.drawImage(img, 0, 0);
+        const testData = testCtx.getImageData(0, 0, img.width, img.height);
+        let transparentCount = 0;
+        for (let i = 3; i < testData.data.length; i += 4) {
+          if (testData.data[i] < 255) transparentCount++;
+        }
+        console.log(`[Image Load] Transparent pixels in original image: ${transparentCount} / ${img.width * img.height} (${(transparentCount / (img.width * img.height) * 100).toFixed(2)}%)`);
+      }
+
       // 初始化裁剪区域为正方形
       const size = Math.min(width, height);
       const x = (width - size) / 2;
       const y = (height - size) / 2;
-      setCrop({ x, y, width: size, height: size });
+      const initialCrop = { x, y, width: size, height: size };
+      setCrop(initialCrop);
 
-      drawCanvas(ctx, img, { x, y, width: size, height: size }, width, height);
+      if (!sampleCanvasRef.current) {
+        sampleCanvasRef.current = document.createElement('canvas');
+      }
+      const sampleCanvas = sampleCanvasRef.current;
+      sampleCanvas.width = img.width;
+      sampleCanvas.height = img.height;
+      const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+      if (sampleCtx) {
+        sampleCtx.clearRect(0, 0, img.width, img.height);
+        sampleCtx.drawImage(img, 0, 0, img.width, img.height);
+      }
+
+      drawCanvas(ctx, img, initialCrop, width, height);
+      performCrop(initialCrop, { width, height });
     };
   }, [image]);
 
@@ -60,14 +98,44 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ image, onCropComplete }) =>
     canvasHeight: number
   ) => {
     ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+    // 先绘制整张图片（包含透明通道）
     ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
 
-    // 绘制遮罩
+    // 调试：检查图片是否有透明像素
+    const imageData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
+    let transparentCount = 0;
+    for (let i = 3; i < imageData.data.length; i += 4) {
+      if (imageData.data[i] < 255) transparentCount++;
+    }
+    console.log(`Transparent pixels: ${transparentCount} / ${canvasWidth * canvasHeight} (${(transparentCount / (canvasWidth * canvasHeight) * 100).toFixed(2)}%)`);
+
+    // 在裁剪区域外绘制半透明黑色遮罩
+    ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-
-    // 清除裁剪区域
     ctx.clearRect(cropArea.x, cropArea.y, cropArea.width, cropArea.height);
+    ctx.restore();
+
+    // 在裁剪区域内绘制棋盘格背景（显示透明度）
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-over';
+    const tile = 16;
+    for (let y = Math.floor(cropArea.y / tile) * tile; y < cropArea.y + cropArea.height; y += tile) {
+      for (let x = Math.floor(cropArea.x / tile) * tile; x < cropArea.x + cropArea.width; x += tile) {
+        const isDark = (Math.floor(x / tile) + Math.floor(y / tile)) % 2 === 0;
+        ctx.fillStyle = isDark ? '#f1f5f9' : '#e2e8f0';
+        ctx.fillRect(
+          Math.max(cropArea.x, x),
+          Math.max(cropArea.y, y),
+          Math.min(tile, cropArea.x + cropArea.width - x),
+          Math.min(tile, cropArea.y + cropArea.height - y)
+        );
+      }
+    }
+    ctx.restore();
+
+    // 重新绘制裁剪区域的图片（在棋盘格上方）
     ctx.drawImage(
       img,
       (cropArea.x / canvasWidth) * img.width,
@@ -107,6 +175,21 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ image, onCropComplete }) =>
     );
   };
 
+  const pickColorAt = (canvasX: number, canvasY: number) => {
+    const img = imgRef.current;
+    const sampleCanvas = sampleCanvasRef.current;
+    if (!img || !sampleCanvas) return null;
+    const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+    if (!sampleCtx || imageSize.width === 0 || imageSize.height === 0) return null;
+
+    const scaleX = img.width / imageSize.width;
+    const scaleY = img.height / imageSize.height;
+    const srcX = Math.min(img.width - 1, Math.max(0, Math.round(canvasX * scaleX)));
+    const srcY = Math.min(img.height - 1, Math.max(0, Math.round(canvasY * scaleY)));
+    const data = sampleCtx.getImageData(srcX, srcY, 1, 1).data;
+    return { r: data[0], g: data[1], b: data[2] };
+  };
+
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -114,6 +197,14 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ image, onCropComplete }) =>
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
+    if (isPickingColor && onColorPick) {
+      const color = pickColorAt(x, y);
+      if (color) {
+        onColorPick(color);
+      }
+      return;
+    }
 
     if (isNearEdge(x, y)) {
       setDragMode('resize');
@@ -136,6 +227,11 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ image, onCropComplete }) =>
     const y = e.clientY - rect.top;
 
     // 更新鼠标样式
+    if (isPickingColor) {
+      canvas.style.cursor = 'crosshair';
+      return;
+    }
+
     if (!dragMode) {
       if (isNearEdge(x, y)) {
         canvas.style.cursor = 'nwse-resize';
@@ -200,7 +296,10 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ image, onCropComplete }) =>
     }
   };
 
-  const performCrop = () => {
+  const performCrop = (
+    cropArea = crop,
+    canvasSize = imageSize
+  ) => {
     const canvas = canvasRef.current;
     const img = imgRef.current;
     if (!canvas || !img) return;
@@ -214,16 +313,19 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ image, onCropComplete }) =>
     const ctx = tempCanvas.getContext('2d');
     if (!ctx) return;
 
+    // 清除画布，确保透明背景
+    ctx.clearRect(0, 0, size, size);
+
     // 计算原图中的裁剪区域
-    const scaleX = img.width / imageSize.width;
-    const scaleY = img.height / imageSize.height;
+    const scaleX = img.width / canvasSize.width;
+    const scaleY = img.height / canvasSize.height;
 
     ctx.drawImage(
       img,
-      crop.x * scaleX,
-      crop.y * scaleY,
-      crop.width * scaleX,
-      crop.height * scaleY,
+      cropArea.x * scaleX,
+      cropArea.y * scaleY,
+      cropArea.width * scaleX,
+      cropArea.height * scaleY,
       0,
       0,
       size,
@@ -242,7 +344,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ image, onCropComplete }) =>
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        className="border border-gray-300 rounded max-w-full"
+        className="checkerboard border border-gray-300 rounded max-w-full"
       />
     </div>
   );

@@ -1,24 +1,62 @@
-import React, { useState } from 'react';
-import { RotateCcw, Download } from 'lucide-react';
-import ImageUploader from './components/ImageUploader';
+import React, { useState, useRef } from 'react';
+import { RotateCcw, Download, Upload, Scissors, Loader2, Pipette } from 'lucide-react';
 import ImageCropper from './components/ImageCropper';
+import type { RgbColor } from './types';
 
 function App() {
   const [image, setImage] = useState<string | null>(null);
   const [croppedImage, setCroppedImage] = useState<string | null>(null);
+  const [bgRemovedImage, setBgRemovedImage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isRemovingBg, setIsRemovingBg] = useState(false);
+  const [isPickingColor, setIsPickingColor] = useState(false);
+  const [selectedColor, setSelectedColor] = useState<RgbColor | null>(null);
+  const [tolerance, setTolerance] = useState(40);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImageSelect = (imageData: string) => {
     setImage(imageData);
     setCroppedImage(null);
+    setBgRemovedImage(null);
+    setSelectedColor(null);
+    setIsPickingColor(false);
   };
 
   const handleCropComplete = (croppedData: string) => {
     setCroppedImage(croppedData);
+    setBgRemovedImage(null);
+  };
+
+  const handleColorPick = (color: RgbColor) => {
+    setSelectedColor(color);
+    setIsPickingColor(false);
+  };
+
+  const handlePickImage = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      handleImageSelect(result);
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
   };
 
   const handleGenerateIcons = async () => {
-    if (!croppedImage) return;
+    const sourceImage = bgRemovedImage || croppedImage;
+    if (!sourceImage) return;
 
     if (!window.electronAPI?.generateIcons) {
       alert('Export is unavailable. Please run the desktop app build.');
@@ -27,7 +65,7 @@ function App() {
 
     setIsGenerating(true);
     try {
-      const result = await window.electronAPI.generateIcons(croppedImage, 'icon');
+      const result = await window.electronAPI.generateIcons(sourceImage, 'icon');
       if (result.success) {
         alert(`图标生成成功！\n保存位置: ${result.path}`);
       } else {
@@ -40,42 +78,151 @@ function App() {
     }
   };
 
+  const handleRemoveColor = async () => {
+    if (!croppedImage) return;
+
+    if (!selectedColor) {
+      alert('Pick a background color first.');
+      return;
+    }
+
+    if (!window.electronAPI?.removeColor) {
+      alert('Color removal is unavailable. Please run the desktop app build.');
+      return;
+    }
+
+    setIsRemovingBg(true);
+    try {
+      // 提取纯 base64（移除 data URL 前缀）
+      const pureBase64 = croppedImage.includes(',')
+        ? croppedImage.split(',')[1]
+        : croppedImage;
+
+      const result = await window.electronAPI.removeColor(pureBase64, selectedColor, tolerance);
+      if (result.success && result.imageBase64) {
+        const removedDataUrl = `data:image/png;base64,${result.imageBase64}`;
+        setBgRemovedImage(result.imageBase64);
+        setImage(removedDataUrl);
+        setCroppedImage(removedDataUrl);
+      } else {
+        alert(`Remove color failed: ${result.message}`);
+      }
+    } catch (error) {
+      alert(`Remove color failed: ${(error as Error).message}`);
+    } finally {
+      setIsRemovingBg(false);
+    }
+  };
+
   const handleReset = () => {
     setImage(null);
     setCroppedImage(null);
+    setBgRemovedImage(null);
+    setSelectedColor(null);
+    setIsPickingColor(false);
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-6">
-      <div className="w-full max-w-2xl">
-        <div className="bg-white rounded-lg shadow-lg p-6">
-          {!image ? (
-            <ImageUploader onImageSelect={handleImageSelect} />
-          ) : (
-            <div className="flex flex-col items-center gap-4">
+      <div className="w-full max-w-[560px]">
+        <div className="bg-white rounded-lg shadow-lg p-4">
+          <div className="flex flex-col items-center gap-4">
+            {image ? (
               <ImageCropper
+                key={image}
                 image={image}
                 onCropComplete={handleCropComplete}
+                isPickingColor={isPickingColor}
+                onColorPick={handleColorPick}
               />
-              <div className="flex gap-3 w-full justify-center">
-                <button
-                  onClick={handleReset}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-gray-100 border border-gray-300 rounded-lg transition-colors shadow-sm font-medium"
-                >
-                  <RotateCcw size={18} />
-                  重新选择
-                </button>
-                <button
-                  onClick={handleGenerateIcons}
-                  disabled={!croppedImage || isGenerating}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded-lg transition-colors disabled:cursor-not-allowed shadow-sm font-medium"
-                >
-                  <Download size={18} />
-                  {isGenerating ? '生成中...' : '导出图标'}
-                </button>
-              </div>
+            ) : (
+              <div className="checkerboard border border-gray-300 rounded w-full max-w-[500px] aspect-square" />
+            )}
+            <div className="flex gap-3 w-full justify-center">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+              <button
+                onClick={handlePickImage}
+                aria-label="Select image"
+                title="Select image"
+                className="flex items-center justify-center w-11 h-11 bg-white hover:bg-gray-100 border border-gray-300 rounded-full transition-colors shadow-sm"
+              >
+                <Upload size={18} />
+              </button>
+              <button
+                onClick={handleReset}
+                disabled={!image}
+                aria-label="Reset selection"
+                title="Reset selection"
+                className="flex items-center justify-center w-11 h-11 bg-white hover:bg-gray-100 border border-gray-300 rounded-full transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RotateCcw size={18} />
+              </button>
+              <button
+                onClick={() => setIsPickingColor((prev) => !prev)}
+                disabled={!image}
+                aria-label="Pick background color"
+                title="Pick background color"
+                className={`flex items-center justify-center w-11 h-11 bg-white hover:bg-gray-100 border border-gray-300 rounded-full transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
+                  isPickingColor ? 'ring-2 ring-indigo-400' : ''
+                }`}
+              >
+                <Pipette size={18} />
+              </button>
+              <div
+                className="w-4 h-4 rounded-full border border-gray-300"
+                title={
+                  selectedColor
+                    ? `rgb(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b})`
+                    : 'No color selected'
+                }
+                style={{
+                  backgroundColor: selectedColor
+                    ? `rgb(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b})`
+                    : 'transparent'
+                }}
+              />
+              <button
+                onClick={handleRemoveColor}
+                disabled={!croppedImage || isRemovingBg}
+                aria-label="Remove color"
+                title="Remove color"
+                className="flex items-center justify-center w-11 h-11 bg-white hover:bg-gray-100 border border-gray-300 rounded-full transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isRemovingBg ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Scissors size={18} />
+                )}
+              </button>
+              <button
+                onClick={handleGenerateIcons}
+                disabled={!(bgRemovedImage || croppedImage) || isGenerating}
+                aria-label="Export icons"
+                title="Export icons"
+                className="flex items-center justify-center w-11 h-11 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded-full transition-colors disabled:cursor-not-allowed shadow-sm"
+              >
+                <Download size={18} />
+              </button>
             </div>
-          )}
+            <div className="flex items-center justify-center gap-2 w-full">
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={tolerance}
+                onChange={(event) => setTolerance(Number(event.target.value))}
+                aria-label="Color tolerance"
+                className="w-40"
+              />
+              <span className="text-xs text-gray-500 w-8 text-right">{tolerance}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>

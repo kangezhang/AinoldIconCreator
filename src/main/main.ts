@@ -3,6 +3,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 import sharp from 'sharp';
 import * as png2icons from 'png2icons';
+import { removeColorFromBase64 } from './colorRemoval';
+import { logError, logInfo } from './logger';
 
 let mainWindow: any = null;
 
@@ -90,6 +92,7 @@ ipcMain.handle('crop-image', async (event: any, { imagePath, cropData }: any) =>
 // 生成图标
 ipcMain.handle('generate-icons', async (event: any, { imageBase64, outputPath }: any) => {
   try {
+    logInfo('Generate icons requested');
     const imageBuffer = Buffer.from(imageBase64, 'base64');
 
     // 确保图片是正方形且至少1024x1024
@@ -154,6 +157,24 @@ ipcMain.handle('generate-icons', async (event: any, { imageBase64, outputPath }:
     return { success: true, path: savePath };
   } catch (error) {
     console.error('Generate icons error:', error);
+    logError('Generate icons failed', error);
+    const err = error as NodeJS.ErrnoException;
+    let message = err?.message || 'Unknown error';
+    if (err?.code === 'UNKNOWN' && err?.path) {
+      message += ' (Try saving to a different folder or allow the app in Windows Controlled Folder Access.)';
+    }
+    return { success: false, message };
+  }
+});
+
+ipcMain.handle('remove-color', async (event: any, { imageBase64, color, tolerance }: any) => {
+  try {
+    logInfo('Remove color requested', { color, tolerance, inputSize: imageBase64?.length || 0 });
+    const resultBase64 = await removeColorFromBase64(imageBase64, color, tolerance);
+    return { success: true, imageBase64: resultBase64 };
+  } catch (error) {
+    console.error('Remove color error:', error);
+    logError('Remove color failed', error);
     return { success: false, message: (error as Error).message };
   }
 });

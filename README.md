@@ -57,3 +57,10 @@ npm run package:mac
 ## License
 
 MIT
+
+
+## Background Removal (Color Key)
+
+1. Click the pipette button and pick the background color on the canvas.
+2. Adjust the tolerance slider to control how much color is removed.
+3. Click the scissors button to apply and update the canvas.

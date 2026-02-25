@@ -5,7 +5,10 @@ const api = {
     ipcRenderer.invoke('crop-image', { imagePath, cropData }),
 
   generateIcons: (imageBase64: string, outputPath: string) =>
-    ipcRenderer.invoke('generate-icons', { imageBase64, outputPath })
+    ipcRenderer.invoke('generate-icons', { imageBase64, outputPath }),
+
+  removeColor: (imageBase64: string, color: { r: number; g: number; b: number }, tolerance: number) =>
+    ipcRenderer.invoke('remove-color', { imageBase64, color, tolerance })
 };
 
 if (process.contextIsolated) {
