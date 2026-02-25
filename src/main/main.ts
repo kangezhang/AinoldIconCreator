@@ -1,0 +1,159 @@
+import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import * as path from 'path';
+import * as fs from 'fs';
+import sharp from 'sharp';
+import * as png2icons from 'png2icons';
+
+let mainWindow: any = null;
+
+function resolvePreloadPath() {
+  const candidates = [
+    path.join(__dirname, '../preload/preload.js'),
+    path.join(app.getAppPath(), 'dist/preload/preload.js')
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  console.warn('Preload script not found. Tried:', candidates);
+  return candidates[0];
+}
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 800,
+    height: 700,
+    minWidth: 700,
+    minHeight: 600,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: resolvePreloadPath()
+    },
+    autoHideMenuBar: true,
+    backgroundColor: '#ffffff'
+  });
+
+  // 隐藏菜单栏
+  mainWindow.setMenuBarVisibility(false);
+
+  if (process.env.NODE_ENV === 'development') {
+    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.webContents.openDevTools();
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+  }
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+}
+
+app.whenReady().then(createWindow);
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('activate', () => {
+  if (mainWindow === null) {
+    createWindow();
+  }
+});
+
+// 处理图片裁剪
+ipcMain.handle('crop-image', async (event: any, { imagePath, cropData }: any) => {
+  try {
+    const { x, y, width, height } = cropData;
+
+    const croppedBuffer = await sharp(imagePath)
+      .extract({
+        left: Math.round(x),
+        top: Math.round(y),
+        width: Math.round(width),
+        height: Math.round(height)
+      })
+      .toBuffer();
+
+    return croppedBuffer.toString('base64');
+  } catch (error) {
+    console.error('Crop error:', error);
+    throw error;
+  }
+});
+
+// 生成图标
+ipcMain.handle('generate-icons', async (event: any, { imageBase64, outputPath }: any) => {
+  try {
+    const imageBuffer = Buffer.from(imageBase64, 'base64');
+
+    // 确保图片是正方形且至少1024x1024
+    const image = sharp(imageBuffer);
+    const metadata = await image.metadata();
+
+    const size = Math.max(metadata.width || 1024, metadata.height || 1024, 1024);
+
+    // 调整大小并居中
+    const resizedBuffer = await sharp(imageBuffer)
+      .resize(size, size, {
+        fit: 'contain',
+        background: { r: 0, g: 0, b: 0, alpha: 0 }
+      })
+      .png()
+      .toBuffer();
+
+    // 选择保存位置
+    const result = await dialog.showSaveDialog({
+      title: '保存图标',
+      defaultPath: outputPath || 'icon',
+      filters: [
+        { name: 'Windows Icon', extensions: ['ico'] },
+        { name: 'Mac Icon', extensions: ['icns'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+
+    if (result.canceled || !result.filePath) {
+      return { success: false, message: '用户取消' };
+    }
+
+    const savePath = result.filePath;
+    const ext = path.extname(savePath).toLowerCase();
+
+    if (ext === '.ico') {
+      // 生成 ICO
+      const icoBuffer = png2icons.createICO(resizedBuffer, png2icons.BICUBIC, 0, false);
+      if (icoBuffer) {
+        fs.writeFileSync(savePath, icoBuffer);
+      }
+    } else if (ext === '.icns') {
+      // 生成 ICNS
+      const icnsBuffer = png2icons.createICNS(resizedBuffer, png2icons.BICUBIC, 0);
+      if (icnsBuffer) {
+        fs.writeFileSync(savePath, icnsBuffer);
+      }
+    } else {
+      // 默认生成两个文件
+      const basePath = savePath.replace(/\.[^/.]+$/, '');
+      const icoBuffer = png2icons.createICO(resizedBuffer, png2icons.BICUBIC, 0, false);
+      const icnsBuffer = png2icons.createICNS(resizedBuffer, png2icons.BICUBIC, 0);
+
+      if (icoBuffer) {
+        fs.writeFileSync(basePath + '.ico', icoBuffer);
+      }
+      if (icnsBuffer) {
+        fs.writeFileSync(basePath + '.icns', icnsBuffer);
+      }
+    }
+
+    return { success: true, path: savePath };
+  } catch (error) {
+    console.error('Generate icons error:', error);
+    return { success: false, message: (error as Error).message };
+  }
+});
