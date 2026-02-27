@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Download, Upload, Eraser, Loader2, Pipette, Check, Crop } from 'lucide-react';
+import { Download, Upload, Eraser, Loader2, Pipette, Check, Crop, Undo2, Redo2 } from 'lucide-react';
+import { useHistory, type AppSnapshot } from './hooks/useHistory';
 import ImageCropper, { type ImageCropperHandle } from './components/ImageCropper';
 import type { RgbColor } from './types';
 
@@ -13,34 +14,67 @@ function App() {
   const [selectedColor, setSelectedColor] = useState<RgbColor | null>(null);
   const [tolerance, setTolerance] = useState(40);
   const [isCropPending, setIsCropPending] = useState(false);
-  const [applyCropToImage, setApplyCropToImage] = useState(false);
+  const applyCropToImageRef = useRef(false);
   const [isCropping, setIsCropping] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cropperRef = useRef<ImageCropperHandle>(null);
 
+  const { saveSnapshot, undo, redo, canUndo, canRedo } = useHistory({
+    image: null, croppedImage: null, bgRemovedImage: null,
+    selectedColor: null, tolerance: 40,
+  });
+
+  const currentSnapshot = (): AppSnapshot => ({
+    image, croppedImage, bgRemovedImage, selectedColor, tolerance,
+  });
+
+  const applySnapshot = (snapshot: AppSnapshot) => {
+    setImage(snapshot.image);
+    setCroppedImage(snapshot.croppedImage);
+    setBgRemovedImage(snapshot.bgRemovedImage);
+    setSelectedColor(snapshot.selectedColor);
+    setTolerance(snapshot.tolerance);
+    setIsCropping(false);
+    setIsCropPending(false);
+    setIsPickingColor(false);
+  };
+
+  const handleUndo = () => {
+    const snapshot = undo(currentSnapshot());
+    if (snapshot) applySnapshot(snapshot);
+  };
+
+  const handleRedo = () => {
+    const snapshot = redo(currentSnapshot());
+    if (snapshot) applySnapshot(snapshot);
+  };
+
   const handleImageSelect = (imageData: string) => {
+    saveSnapshot(currentSnapshot());
     setImage(imageData);
     setCroppedImage(null);
     setBgRemovedImage(null);
     setSelectedColor(null);
     setIsPickingColor(false);
     setIsCropPending(false);
-    setApplyCropToImage(false);
+    applyCropToImageRef.current = false;
     setIsCropping(true);
   };
 
   const handleCropComplete = (croppedData: string) => {
     setCroppedImage(croppedData);
     setBgRemovedImage(null);
-    if (applyCropToImage) {
+    if (applyCropToImageRef.current) {
+      saveSnapshot(currentSnapshot());
       setImage(`data:image/png;base64,${croppedData}`);
-      setApplyCropToImage(false);
+      applyCropToImageRef.current = false;
       setIsCropping(false);
       setIsCropPending(false);
     }
   };
 
   const handleColorPick = (color: RgbColor) => {
+    saveSnapshot(currentSnapshot());
     setSelectedColor(color);
     setIsPickingColor(false);
   };
@@ -56,7 +90,7 @@ function App() {
       return;
     }
     if (!isCropPending) return;
-    setApplyCropToImage(true);
+    applyCropToImageRef.current = true;
     cropperRef.current?.applyCrop();
   };
 
@@ -125,6 +159,7 @@ function App() {
       const result = await window.electronAPI.removeColor(pureBase64, selectedColor, tolerance);
       if (result.success && result.imageBase64) {
         const removedDataUrl = `data:image/png;base64,${result.imageBase64}`;
+        saveSnapshot(currentSnapshot());
         setBgRemovedImage(result.imageBase64);
         setImage(removedDataUrl);
         setCroppedImage(removedDataUrl);
@@ -149,10 +184,21 @@ function App() {
           target.isContentEditable);
       if (isEditable) return;
 
+      if ((event.ctrlKey || event.metaKey) && event.key === 'z') {
+        event.preventDefault();
+        handleUndo();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key === 'y') {
+        event.preventDefault();
+        handleRedo();
+        return;
+      }
+
       if (event.key === 'Enter') {
         if (!isCropping || !isCropPending) return;
         event.preventDefault();
-        setApplyCropToImage(true);
+        applyCropToImageRef.current = true;
         cropperRef.current?.applyCrop();
       }
 
@@ -161,13 +207,13 @@ function App() {
         event.preventDefault();
         setIsCropping(false);
         setIsCropPending(false);
-        setApplyCropToImage(false);
+        applyCropToImageRef.current = false;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [image, isCropping, isCropPending]);
+  }, [image, isCropping, isCropPending, handleUndo, handleRedo]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-6">
@@ -196,6 +242,24 @@ function App() {
                 onChange={handleFileChange}
                 className="hidden"
               />
+              <button
+                onClick={handleUndo}
+                disabled={!canUndo}
+                aria-label="Undo"
+                title="Undo (Ctrl+Z)"
+                className="flex items-center justify-center w-11 h-11 bg-white hover:bg-gray-100 border border-gray-300 rounded-full transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Undo2 size={18} />
+              </button>
+              <button
+                onClick={handleRedo}
+                disabled={!canRedo}
+                aria-label="Redo"
+                title="Redo (Ctrl+Y)"
+                className="flex items-center justify-center w-11 h-11 bg-white hover:bg-gray-100 border border-gray-300 rounded-full transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Redo2 size={18} />
+              </button>
               <button
                 onClick={handlePickImage}
                 aria-label="Select image"
@@ -277,6 +341,7 @@ function App() {
                 max={100}
                 value={tolerance}
                 onChange={(event) => setTolerance(Number(event.target.value))}
+                onPointerUp={() => saveSnapshot(currentSnapshot())}
                 aria-label="Color tolerance"
                 className="w-40"
               />
