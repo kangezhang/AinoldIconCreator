@@ -1,8 +1,16 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Download, Upload, Eraser, Loader2, Pipette, Check, Crop, Undo2, Redo2 } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  Download, Upload, Eraser, Loader2, Pipette, Check, Crop,
+  Undo2, Redo2, MousePointer, RectangleHorizontal, Circle,
+  PenLine, Brush, Scissors, X, Plus, Minus, Square
+} from 'lucide-react';
 import { useHistory, type AppSnapshot } from './hooks/useHistory';
+import { useSelectionMask } from './hooks/useSelectionMask';
+import { isMaskEmpty } from './utils/maskUtils';
 import ImageCropper, { type ImageCropperHandle } from './components/ImageCropper';
+import { ToolGroup } from './components/ToolGroup';
 import type { RgbColor } from './types';
+import type { ActiveTool, SelectionMask } from './types/selection';
 
 function App() {
   const [image, setImage] = useState<string | null>(null);
@@ -10,23 +18,32 @@ function App() {
   const [bgRemovedImage, setBgRemovedImage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRemovingBg, setIsRemovingBg] = useState(false);
-  const [isPickingColor, setIsPickingColor] = useState(false);
   const [selectedColor, setSelectedColor] = useState<RgbColor | null>(null);
-  const [tolerance, setTolerance] = useState(40);
+  const [tolerance, setTolerance] = useState(15);
   const [isCropPending, setIsCropPending] = useState(false);
+  const [activeTool, setActiveTool] = useState<ActiveTool>('none');
   const applyCropToImageRef = useRef(false);
-  const [isCropping, setIsCropping] = useState(false);
+  const initCropRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cropperRef = useRef<ImageCropperHandle>(null);
+  const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
+
+  const {
+    selectionMask, setSelectionMask,
+    selectionMode, setSelectionMode,
+    commitToolResult, clearSelection, selectAll,
+  } = useSelectionMask();
 
   const { saveSnapshot, undo, redo, canUndo, canRedo } = useHistory({
     image: null, croppedImage: null, bgRemovedImage: null,
-    selectedColor: null, tolerance: 40,
+    selectedColor: null, tolerance: 15,
+    selectionMask: null, operationType: 'initial',
   });
 
-  const currentSnapshot = (): AppSnapshot => ({
+  const currentSnapshot = useCallback((): AppSnapshot => ({
     image, croppedImage, bgRemovedImage, selectedColor, tolerance,
-  });
+    selectionMask, operationType: 'initial',
+  }), [image, croppedImage, bgRemovedImage, selectedColor, tolerance, selectionMask]);
 
   const applySnapshot = (snapshot: AppSnapshot) => {
     setImage(snapshot.image);
@@ -34,9 +51,9 @@ function App() {
     setBgRemovedImage(snapshot.bgRemovedImage);
     setSelectedColor(snapshot.selectedColor);
     setTolerance(snapshot.tolerance);
-    setIsCropping(false);
+    setSelectionMask(snapshot.selectionMask);
+    setActiveTool('none');
     setIsCropPending(false);
-    setIsPickingColor(false);
   };
 
   const handleUndo = () => {
@@ -55,20 +72,28 @@ function App() {
     setCroppedImage(null);
     setBgRemovedImage(null);
     setSelectedColor(null);
-    setIsPickingColor(false);
+    setActiveTool('crop');
     setIsCropPending(false);
     applyCropToImageRef.current = false;
-    setIsCropping(true);
+    initCropRef.current = true;
+    clearSelection();
   };
 
   const handleCropComplete = (croppedData: string) => {
-    setCroppedImage(croppedData);
-    setBgRemovedImage(null);
+    if (initCropRef.current) {
+      initCropRef.current = false;
+      setCroppedImage(`data:image/png;base64,${croppedData}`);
+      return;
+    }
     if (applyCropToImageRef.current) {
-      saveSnapshot(currentSnapshot());
-      setImage(`data:image/png;base64,${croppedData}`);
+      saveSnapshot({ ...currentSnapshot(), operationType: 'crop' });
+      const dataUrl = `data:image/png;base64,${croppedData}`;
+      setImage(dataUrl);
+      setCroppedImage(dataUrl);
+      setBgRemovedImage(null);
+      clearSelection();
       applyCropToImageRef.current = false;
-      setIsCropping(false);
+      setActiveTool('none');
       setIsCropPending(false);
     }
   };
@@ -76,17 +101,42 @@ function App() {
   const handleColorPick = (color: RgbColor) => {
     saveSnapshot(currentSnapshot());
     setSelectedColor(color);
-    setIsPickingColor(false);
+    setActiveTool('none');
   };
 
-  const handlePickImage = () => {
-    fileInputRef.current?.click();
+  const handlePointErase = async (imageX: number, imageY: number) => {
+    if (!croppedImage) return;
+    if (!window.electronAPI?.removeColorAtPoint) {
+      alert('Point erase is unavailable. Please run the desktop app build.');
+      return;
+    }
+    setActiveTool('none');
+    setIsRemovingBg(true);
+    try {
+      const pureBase64 = croppedImage.includes(',') ? croppedImage.split(',')[1] : croppedImage;
+      const result = await window.electronAPI.removeColorAtPoint(pureBase64, imageX, imageY, tolerance);
+      if (result.success && result.imageBase64) {
+        const removedDataUrl = `data:image/png;base64,${result.imageBase64}`;
+        saveSnapshot({ ...currentSnapshot(), operationType: 'removeColorPoint' });
+        setBgRemovedImage(result.imageBase64);
+        setImage(removedDataUrl);
+        setCroppedImage(removedDataUrl);
+      } else {
+        alert(`Point erase failed: ${result.message}`);
+      }
+    } catch (error) {
+      alert(`Point erase failed: ${(error as Error).message}`);
+    } finally {
+      setIsRemovingBg(false);
+    }
   };
+
+  const handlePickImage = () => fileInputRef.current?.click();
 
   const handleApplyCrop = () => {
     if (!image) return;
-    if (!isCropping) {
-      setIsCropping(true);
+    if (activeTool !== 'crop') {
+      setActiveTool('crop');
       return;
     }
     if (!isCropPending) return;
@@ -97,17 +147,9 @@ function App() {
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-      alert('Please select an image file.');
-      return;
-    }
-
+    if (!file.type.startsWith('image/')) { alert('Please select an image file.'); return; }
     const reader = new FileReader();
-    reader.onload = (e) => {
-      const result = e.target?.result as string;
-      handleImageSelect(result);
-    };
+    reader.onload = (e) => handleImageSelect(e.target?.result as string);
     reader.readAsDataURL(file);
     event.target.value = '';
   };
@@ -115,20 +157,15 @@ function App() {
   const handleGenerateIcons = async () => {
     const sourceImage = bgRemovedImage || croppedImage;
     if (!sourceImage) return;
-
     if (!window.electronAPI?.generateIcons) {
       alert('Export is unavailable. Please run the desktop app build.');
       return;
     }
-
     setIsGenerating(true);
     try {
       const result = await window.electronAPI.generateIcons(sourceImage, 'icon');
-      if (result.success) {
-        alert(`图标生成成功！\n保存位置: ${result.path}`);
-      } else {
-        alert(`生成失败: ${result.message}`);
-      }
+      if (result.success) alert(`图标生成成功！\n保存位置: ${result.path}`);
+      else alert(`生成失败: ${result.message}`);
     } catch (error) {
       alert(`生成失败: ${(error as Error).message}`);
     } finally {
@@ -138,28 +175,18 @@ function App() {
 
   const handleRemoveColor = async () => {
     if (!croppedImage) return;
-
-    if (!selectedColor) {
-      alert('Pick a background color first.');
-      return;
-    }
-
+    if (!selectedColor) { alert('Pick a background color first.'); return; }
     if (!window.electronAPI?.removeColor) {
       alert('Color removal is unavailable. Please run the desktop app build.');
       return;
     }
-
     setIsRemovingBg(true);
     try {
-      // 提取纯 base64（移除 data URL 前缀）
-      const pureBase64 = croppedImage.includes(',')
-        ? croppedImage.split(',')[1]
-        : croppedImage;
-
+      const pureBase64 = croppedImage.includes(',') ? croppedImage.split(',')[1] : croppedImage;
       const result = await window.electronAPI.removeColor(pureBase64, selectedColor, tolerance);
       if (result.success && result.imageBase64) {
         const removedDataUrl = `data:image/png;base64,${result.imageBase64}`;
-        saveSnapshot(currentSnapshot());
+        saveSnapshot({ ...currentSnapshot(), operationType: 'removeColorEdge' });
         setBgRemovedImage(result.imageBase64);
         setImage(removedDataUrl);
         setCroppedImage(removedDataUrl);
@@ -173,181 +200,216 @@ function App() {
     }
   };
 
+  const handleApplySelection = async () => {
+    if (!selectionMask || isMaskEmpty(selectionMask) || !croppedImage) return;
+    if (!window.electronAPI?.applySelection) {
+      alert('Apply selection is unavailable. Please run the desktop app build.');
+      return;
+    }
+    setIsRemovingBg(true);
+    try {
+      const pureBase64 = croppedImage.includes(',') ? croppedImage.split(',')[1] : croppedImage;
+      const result = await window.electronAPI.applySelection(
+        pureBase64,
+        Array.from(selectionMask.data),
+        selectionMask.width,
+        selectionMask.height
+      );
+      if (result.success && result.imageBase64) {
+        const dataUrl = `data:image/png;base64,${result.imageBase64}`;
+        saveSnapshot({ ...currentSnapshot(), operationType: 'applySelection' });
+        setImage(dataUrl);
+        setCroppedImage(dataUrl);
+        setBgRemovedImage(result.imageBase64);
+        clearSelection();
+      } else {
+        alert(`Apply selection failed: ${result.message}`);
+      }
+    } catch (error) {
+      alert(`Apply selection failed: ${(error as Error).message}`);
+    } finally {
+      setIsRemovingBg(false);
+    }
+  };
+
+  const handleToolCommit = (mask: SelectionMask) => {
+    commitToolResult(mask);
+  };
+
+  const toggleTool = (tool: ActiveTool) => {
+    setActiveTool(prev => prev === tool ? 'none' : tool);
+  };
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!image) return;
       const target = event.target as HTMLElement | null;
-      const isEditable =
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.isContentEditable);
+      const isEditable = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
       if (isEditable) return;
 
-      if ((event.ctrlKey || event.metaKey) && event.key === 'z') {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'z') { event.preventDefault(); handleUndo(); return; }
+      if ((event.ctrlKey || event.metaKey) && event.key === 'y') { event.preventDefault(); handleRedo(); return; }
+      if ((event.ctrlKey || event.metaKey) && event.key === 'a') {
         event.preventDefault();
-        handleUndo();
+        if (imageSize.width > 0) selectAll(imageSize.width, imageSize.height);
         return;
       }
-      if ((event.ctrlKey || event.metaKey) && event.key === 'y') {
-        event.preventDefault();
-        handleRedo();
-        return;
+
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        if (selectionMask && !isMaskEmpty(selectionMask)) { event.preventDefault(); handleApplySelection(); return; }
       }
 
       if (event.key === 'Enter') {
-        if (!isCropping || !isCropPending) return;
-        event.preventDefault();
-        applyCropToImageRef.current = true;
-        cropperRef.current?.applyCrop();
+        if (activeTool === 'crop' && isCropPending) {
+          event.preventDefault();
+          applyCropToImageRef.current = true;
+          cropperRef.current?.applyCrop();
+        }
       }
 
       if (event.key === 'Escape') {
-        if (!isCropping) return;
-        event.preventDefault();
-        setIsCropping(false);
-        setIsCropPending(false);
-        applyCropToImageRef.current = false;
+        if (selectionMask) { clearSelection(); return; }
+        if (activeTool === 'crop') {
+          event.preventDefault();
+          setActiveTool('none');
+          setIsCropPending(false);
+          applyCropToImageRef.current = false;
+        }
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [image, isCropping, isCropPending, handleUndo, handleRedo]);
+  }, [image, activeTool, isCropPending, selectionMask, imageSize, handleUndo, handleRedo]);
+
+  const isCropping = activeTool === 'crop';
+  const hasSelection = selectionMask !== null && !isMaskEmpty(selectionMask);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-6">
-      <div className="w-full max-w-[560px]">
-        <div className="bg-white rounded-lg shadow-lg p-4">
-          <div className="flex flex-col items-center gap-4">
-            {image ? (
-              <ImageCropper
-                key={image}
-                image={image}
-                onCropComplete={handleCropComplete}
-                isPickingColor={isPickingColor}
-                onColorPick={handleColorPick}
-                onPendingChange={setIsCropPending}
-                isCropping={isCropping}
-                ref={cropperRef}
-              />
-            ) : (
-              <div className="checkerboard border border-gray-300 rounded w-full max-w-[500px] aspect-square" />
-            )}
-            <div className="flex gap-3 w-full justify-center">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleFileChange}
-                className="hidden"
-              />
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col items-center justify-start p-4 gap-4">
+      <div className="bg-white rounded-lg shadow-lg p-4 w-[532px] h-[532px] flex items-center justify-center">
+        {image ? (
+          <ImageCropper
+            key={image}
+            image={image}
+            onCropComplete={handleCropComplete}
+            activeTool={activeTool}
+            selectionMask={selectionMask}
+            selectionMode={selectionMode}
+            onToolCommit={handleToolCommit}
+            onColorPick={handleColorPick}
+            onPendingChange={setIsCropPending}
+            onPointErase={handlePointErase}
+            onImageSizeChange={(w, h) => setImageSize({ width: w, height: h })}
+            ref={cropperRef}
+          />
+        ) : (
+          <div className="checkerboard border border-gray-300 rounded w-[500px] h-[500px]" />
+        )}
+      </div>
+
+      {/* Toolbar */}
+      <div className="bg-white rounded-lg shadow-lg p-3 w-fit">
+        <div className="flex gap-2 items-center justify-center">
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
+
+          {/* Undo / Redo */}
+          <button onClick={handleUndo} disabled={!canUndo} title="Undo (Ctrl+Z)" className="tool-btn disabled:opacity-50 disabled:cursor-not-allowed"><Undo2 size={16} /></button>
+          <button onClick={handleRedo} disabled={!canRedo} title="Redo (Ctrl+Y)" className="tool-btn disabled:opacity-50 disabled:cursor-not-allowed"><Redo2 size={16} /></button>
+
+          <div className="w-px h-8 bg-gray-200 mx-1" />
+
+          {/* File / Crop */}
+          <button onClick={handlePickImage} title="Open image" className="tool-btn"><Upload size={16} /></button>
+          <button
+            onClick={handleApplyCrop}
+            disabled={!image || (isCropping && !isCropPending)}
+            title={!isCropping ? 'Enter crop mode' : isCropPending ? 'Apply crop (Enter)' : 'Adjust or Esc to exit'}
+            className={`tool-btn disabled:opacity-50 disabled:cursor-not-allowed ${isCropping ? 'ring-2 ring-indigo-400' : ''}`}
+          >
+            {isCropping ? <Check size={16} /> : <Crop size={16} />}
+          </button>
+
+          <div className="w-px h-8 bg-gray-200 mx-1" />
+
+          {/* Selection tool group (long-press to switch sub-tool) */}
+          <ToolGroup
+            disabled={!image}
+            activeId={['rectSelect','ellipseSelect','lassoSelect','paintSelect'].includes(activeTool) ? activeTool : null}
+            onSelect={id => setActiveTool(id as ActiveTool)}
+            items={[
+              { id: 'rectSelect',    icon: <RectangleHorizontal size={16} />, title: 'Rectangle select' },
+              { id: 'ellipseSelect', icon: <Circle size={16} />,              title: 'Ellipse select' },
+              { id: 'lassoSelect',   icon: <PenLine size={16} />,             title: 'Lasso select' },
+              { id: 'paintSelect',   icon: <Brush size={16} />,               title: 'Paint select' },
+            ]}
+          />
+
+          {/* Selection mode: compact 3-button strip */}
+          <div className="flex rounded-lg border border-gray-300 overflow-hidden shadow-sm flex-shrink-0">
+            {([
+              { mode: 'replace', icon: <Square size={13} />,  title: 'Replace selection' },
+              { mode: 'add',     icon: <Plus size={13} />,    title: 'Add to selection' },
+              { mode: 'subtract',icon: <Minus size={13} />,   title: 'Subtract from selection' },
+            ] as const).map(({ mode, icon, title }) => (
               <button
-                onClick={handleUndo}
-                disabled={!canUndo}
-                aria-label="Undo"
-                title="Undo (Ctrl+Z)"
-                className="flex items-center justify-center w-11 h-11 bg-white hover:bg-gray-100 border border-gray-300 rounded-full transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                key={mode}
+                onClick={() => setSelectionMode(mode)}
+                title={title}
+                className={`flex items-center justify-center w-7 h-9 transition-colors text-gray-600
+                  ${selectionMode === mode ? 'bg-blue-100 text-blue-600' : 'bg-white hover:bg-gray-100'}`}
               >
-                <Undo2 size={18} />
+                {icon}
               </button>
-              <button
-                onClick={handleRedo}
-                disabled={!canRedo}
-                aria-label="Redo"
-                title="Redo (Ctrl+Y)"
-                className="flex items-center justify-center w-11 h-11 bg-white hover:bg-gray-100 border border-gray-300 rounded-full transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Redo2 size={18} />
-              </button>
-              <button
-                onClick={handlePickImage}
-                aria-label="Select image"
-                title="Select image"
-                className="flex items-center justify-center w-11 h-11 bg-white hover:bg-gray-100 border border-gray-300 rounded-full transition-colors shadow-sm"
-              >
-                <Upload size={18} />
-              </button>
-              <button
-                onClick={handleApplyCrop}
-                disabled={!image || (isCropping && !isCropPending)}
-                aria-label={isCropping ? 'Apply crop' : 'Enter crop mode'}
-                title={
-                  !image
-                    ? 'Select image'
-                    : !isCropping
-                      ? 'Enter crop mode (Esc to exit)'
-                      : isCropPending
-                        ? 'Apply crop (Enter)'
-                        : 'Adjust selection or press Esc to exit'
-                }
-                className={`flex items-center justify-center w-11 h-11 bg-white hover:bg-gray-100 border border-gray-300 rounded-full transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
-                  isCropPending ? 'ring-2 ring-indigo-400' : ''
-                }`}
-              >
-                {isCropping ? <Check size={18} /> : <Crop size={18} />}
-              </button>
-              <button
-                onClick={() => setIsPickingColor((prev) => !prev)}
-                disabled={!image}
-                aria-label="Pick background color"
-                title="Pick background color"
-                className={`flex items-center justify-center w-11 h-11 bg-white hover:bg-gray-100 border border-gray-300 rounded-full transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
-                  isPickingColor ? 'ring-2 ring-indigo-400' : ''
-                }`}
-              >
-                <Pipette size={18} />
-              </button>
-              <div
-                className="w-4 h-4 rounded-full border border-gray-300"
-                title={
-                  selectedColor
-                    ? `rgb(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b})`
-                    : 'No color selected'
-                }
-                style={{
-                  backgroundColor: selectedColor
-                    ? `rgb(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b})`
-                    : 'transparent'
-                }}
-              />
-              <button
-                onClick={handleRemoveColor}
-                disabled={!croppedImage || isRemovingBg}
-                aria-label="Remove background color"
-                title="Remove background color"
-                className="flex items-center justify-center w-11 h-11 bg-white hover:bg-gray-100 border border-gray-300 rounded-full transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isRemovingBg ? (
-                  <Loader2 size={18} className="animate-spin" />
-                ) : (
-                  <Eraser size={18} />
-                )}
-              </button>
-              <button
-                onClick={handleGenerateIcons}
-                disabled={!(bgRemovedImage || croppedImage) || isGenerating}
-                aria-label="Export icons"
-                title="Export icons"
-                className="flex items-center justify-center w-11 h-11 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded-full transition-colors disabled:cursor-not-allowed shadow-sm"
-              >
-                <Download size={18} />
-              </button>
-            </div>
-            <div className="flex items-center justify-center gap-2 w-full">
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={tolerance}
-                onChange={(event) => setTolerance(Number(event.target.value))}
-                onPointerUp={() => saveSnapshot(currentSnapshot())}
-                aria-label="Color tolerance"
-                className="w-40"
-              />
-              <span className="text-xs text-gray-500 w-8 text-right">{tolerance}</span>
-            </div>
+            ))}
           </div>
+
+          {/* Apply / clear selection */}
+          <button onClick={handleApplySelection} disabled={!hasSelection || isRemovingBg} title="Delete selected area (Delete)" className="tool-btn disabled:opacity-50 disabled:cursor-not-allowed">
+            {isRemovingBg ? <Loader2 size={16} className="animate-spin" /> : <Scissors size={16} />}
+          </button>
+          <button onClick={clearSelection} disabled={!hasSelection} title="Clear selection (Esc)" className="tool-btn disabled:opacity-50 disabled:cursor-not-allowed"><X size={16} /></button>
+
+          <div className="w-px h-8 bg-gray-200 mx-1" />
+
+          {/* Color / erase tool group */}
+          <button onClick={() => toggleTool('colorPick')} disabled={!image} title="Pick background color" className={`tool-btn disabled:opacity-50 ${activeTool === 'colorPick' ? 'ring-2 ring-indigo-400' : ''}`}><Pipette size={16} /></button>
+          <div
+            className="w-4 h-4 rounded-full border border-gray-300 flex-shrink-0"
+            title={selectedColor ? `rgb(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b})` : 'No color selected'}
+            style={{ backgroundColor: selectedColor ? `rgb(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b})` : 'transparent' }}
+          />
+
+          <ToolGroup
+            disabled={!croppedImage || isRemovingBg}
+            activeId={activeTool === 'pointErase' ? 'pointErase' : null}
+            onSelect={id => {
+              if (id === 'eraseEdge') handleRemoveColor();
+              else setActiveTool(id as ActiveTool);
+            }}
+            items={[
+              { id: 'eraseEdge',  icon: isRemovingBg ? <Loader2 size={16} className="animate-spin" /> : <Eraser size={16} />,       title: 'Remove background (flood from edges)' },
+              { id: 'pointErase', icon: <MousePointer size={16} />, title: 'Click to erase region (flood fill from point)' },
+            ]}
+          />
+
+          {/* Tolerance */}
+          <div className="flex items-center gap-1 text-xs text-gray-500 flex-shrink-0">
+            <span>Tol</span>
+            <input
+              type="range" min={1} max={80} value={tolerance}
+              onChange={e => setTolerance(Number(e.target.value))}
+              className="w-14 h-1 accent-indigo-500"
+              title={`Tolerance: ${tolerance}`}
+            />
+            <span className="w-5 text-right">{tolerance}</span>
+          </div>
+
+          <div className="w-px h-8 bg-gray-200 mx-1" />
+
+          {/* Export */}
+          <button onClick={handleGenerateIcons} disabled={!(bgRemovedImage || croppedImage) || isGenerating} title="Export icons" className="tool-btn bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white disabled:cursor-not-allowed">
+            {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+          </button>
         </div>
       </div>
     </div>

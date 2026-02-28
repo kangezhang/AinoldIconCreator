@@ -1,7 +1,16 @@
 import { useState, useCallback } from 'react';
 import type { RgbColor } from '../types';
+import type { MaybeSelectionMask } from '../types/selection';
 
 const MAX_HISTORY = 20;
+
+export type OperationType =
+  | 'initial'
+  | 'load'
+  | 'crop'
+  | 'removeColorEdge'
+  | 'removeColorPoint'
+  | 'applySelection';
 
 export interface AppSnapshot {
   image: string | null;
@@ -9,6 +18,8 @@ export interface AppSnapshot {
   bgRemovedImage: string | null;
   selectedColor: RgbColor | null;
   tolerance: number;
+  selectionMask: MaybeSelectionMask;
+  operationType: OperationType;
 }
 
 export function useHistory(initial: AppSnapshot) {

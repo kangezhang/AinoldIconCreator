@@ -3,7 +3,8 @@ import * as path from 'path';
 import * as fs from 'fs';
 import sharp from 'sharp';
 import * as png2icons from 'png2icons';
-import { removeColorFromBase64 } from './colorRemoval';
+import { removeColorFromBase64, removeColorAtPoint } from './colorRemoval';
+import { applySelectionToImage } from './applySelection';
 import { logError, logInfo } from './logger';
 
 let mainWindow: any = null;
@@ -185,6 +186,29 @@ ipcMain.handle('remove-color', async (event: any, { imageBase64, color, toleranc
   } catch (error) {
     console.error('Remove color error:', error);
     logError('Remove color failed', error);
+    return { success: false, message: (error as Error).message };
+  }
+});
+
+ipcMain.handle('remove-color-at-point', async (event: any, { imageBase64, seedX, seedY, tolerance }: any) => {
+  try {
+    logInfo('Remove color at point requested', { seedX, seedY, tolerance, inputSize: imageBase64?.length || 0 });
+    const resultBase64 = await removeColorAtPoint(imageBase64, seedX, seedY, tolerance);
+    return { success: true, imageBase64: resultBase64 };
+  } catch (error) {
+    console.error('Remove color at point error:', error);
+    logError('Remove color at point failed', error);
+    return { success: false, message: (error as Error).message };
+  }
+});
+
+ipcMain.handle('apply-selection', async (event: any, { imageBase64, maskData, maskWidth, maskHeight }: any) => {
+  try {
+    logInfo('Apply selection requested', { maskWidth, maskHeight, pixels: maskData?.length || 0 });
+    const resultBase64 = await applySelectionToImage(imageBase64, maskData, maskWidth, maskHeight);
+    return { success: true, imageBase64: resultBase64 };
+  } catch (error) {
+    logError('Apply selection failed', error);
     return { success: false, message: (error as Error).message };
   }
 });

@@ -2,6 +2,8 @@ export interface ElectronAPI {
   cropImage: (imagePath: string, cropData: CropData) => Promise<string>;
   generateIcons: (imageBase64: string, outputPath: string) => Promise<GenerateResult>;
   removeColor: (imageBase64: string, color: RgbColor, tolerance: number) => Promise<RemoveColorResult>;
+  removeColorAtPoint: (imageBase64: string, seedX: number, seedY: number, tolerance: number) => Promise<RemoveColorResult>;
+  applySelection: (imageBase64: string, maskData: number[], maskWidth: number, maskHeight: number) => Promise<RemoveColorResult>;
 }
 
 export interface CropData {

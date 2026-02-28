@@ -26,3 +26,7 @@ body {
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
 }
+
+.tool-btn {
+  @apply flex items-center justify-center w-9 h-9 bg-white hover:bg-gray-100 border border-gray-300 rounded-lg transition-colors shadow-sm flex-shrink-0;
+}
