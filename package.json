@@ -27,6 +27,7 @@
     "@types/node": "^20.11.0",
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
+    "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.17",
     "concurrently": "^8.2.2",
@@ -39,12 +40,15 @@
     "vite-plugin-electron": "^0.28.2"
   },
   "dependencies": {
+    "immer": "^11.1.4",
     "lucide-react": "^0.575.0",
     "png2icons": "^2.0.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-easy-crop": "^5.0.4",
-    "sharp": "^0.33.2"
+    "sharp": "^0.33.2",
+    "uuid": "^13.0.0",
+    "zustand": "^5.0.12"
   },
   "build": {
     "appId": "com.ainold.iconcreator",

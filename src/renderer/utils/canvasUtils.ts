@@ -3,10 +3,14 @@ import type { RgbColor } from '../types';
 
 export function getCanvasPoint(
   e: React.MouseEvent<HTMLCanvasElement>,
-  canvas: HTMLCanvasElement
+  canvas: HTMLCanvasElement,
+  zoom = 1
 ): { x: number; y: number } {
   const rect = canvas.getBoundingClientRect();
-  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  return {
+    x: (e.clientX - rect.left) / zoom,
+    y: (e.clientY - rect.top) / zoom,
+  };
 }
 
 export function canvasToImageCoords(

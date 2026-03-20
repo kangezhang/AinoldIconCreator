@@ -330,25 +330,15 @@ function drawCropOverlay(
   canvasWidth: number,
   canvasHeight: number
 ) {
+  // Draw dark overlay on non-crop areas
   ctx.save();
   ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
   ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-  ctx.clearRect(crop.x, crop.y, crop.width, crop.height);
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillRect(crop.x, crop.y, crop.width, crop.height);
   ctx.restore();
 
-  // Checkerboard inside crop
-  ctx.save();
-  ctx.globalCompositeOperation = 'destination-over';
-  const tile = 16;
-  for (let y = Math.floor(crop.y / tile) * tile; y < crop.y + crop.height; y += tile) {
-    for (let x = Math.floor(crop.x / tile) * tile; x < crop.x + crop.width; x += tile) {
-      const isDark = (Math.floor(x / tile) + Math.floor(y / tile)) % 2 === 0;
-      ctx.fillStyle = isDark ? '#f1f5f9' : '#e2e8f0';
-      ctx.fillRect(Math.max(crop.x, x), Math.max(crop.y, y), Math.min(tile, crop.x + crop.width - x), Math.min(tile, crop.y + crop.height - y));
-    }
-  }
-  ctx.restore();
-
+  // Draw crop border
   ctx.strokeStyle = '#4F46E5';
   ctx.lineWidth = 2;
   ctx.strokeRect(crop.x, crop.y, crop.width, crop.height);

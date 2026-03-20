@@ -2,6 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -9,24 +13,83 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: #1e1e1e;
+  color: #cccccc;
+  overflow: hidden;
 }
 
 #root {
   width: 100vw;
   height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
+/* Legacy checkerboard (kept for compatibility) */
 .checkerboard {
-  background-color: #f8fafc;
+  background-color: #2a2a2a;
   background-image:
-    linear-gradient(45deg, rgba(0, 0, 0, 0.05) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(0, 0, 0, 0.05) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, rgba(0, 0, 0, 0.05) 75%),
-    linear-gradient(-45deg, transparent 75%, rgba(0, 0, 0, 0.05) 75%);
+    linear-gradient(45deg, #3a3a3a 25%, transparent 25%),
+    linear-gradient(-45deg, #3a3a3a 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #3a3a3a 75%),
+    linear-gradient(-45deg, transparent 75%, #3a3a3a 75%);
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
 }
 
+/* Editor tool button (dark theme) */
 .tool-btn {
-  @apply flex items-center justify-center w-9 h-9 bg-white hover:bg-gray-100 border border-gray-300 rounded-lg transition-colors shadow-sm flex-shrink-0;
+  @apply flex items-center justify-center w-8 h-8 rounded transition-colors flex-shrink-0;
+  color: #aaa;
+  background: transparent;
+  border: none;
+  outline: none;
+}
+.tool-btn:hover:not(:disabled) {
+  background: #3a3a3a;
+}
+.tool-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.tool-btn.active {
+  background: #4a9eff22;
+  color: #4a9eff;
+}
+
+/* Scrollbar styling for dark theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #252525;
+}
+::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #777;
+}
+
+/* Range input styling */
+input[type='range'] {
+  accent-color: #4a9eff;
+}
+
+/* Number input */
+input[type='number'] {
+  background: #1a1a1a;
+  border: 1px solid #3d3d3d;
+  color: #ccc;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 12px;
+  width: 52px;
+  text-align: right;
+}
+input[type='number']:focus {
+  outline: none;
+  border-color: #4a9eff;
 }

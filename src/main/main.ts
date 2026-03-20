@@ -112,13 +112,17 @@ ipcMain.handle('generate-icons', async (event: any, { imageBase64, outputPath }:
 
     const size = Math.max(metadata.width || 1024, metadata.height || 1024, 1024);
 
-    // 调整大小并居中
+    // 调整大小并居中，确保输出完整的 PNG 格式
     const resizedBuffer = await sharp(imageBuffer)
       .resize(size, size, {
         fit: 'contain',
         background: { r: 0, g: 0, b: 0, alpha: 0 }
       })
-      .png()
+      .png({
+        compressionLevel: 9,
+        adaptiveFiltering: true,
+        force: true
+      })
       .toBuffer();
 
     // 选择保存位置

@@ -5,16 +5,15 @@ import { getCanvasPoint } from '../utils/canvasUtils';
 
 const BRUSH_RADIUS = 12;
 
-export function usePaintSelectTool({ isActive, canvasRef, imageSize, onCommit }: SelectionToolParams) {
+export function usePaintSelectTool({ isActive, canvasRef, imageSize, onCommit, zoom = 1 }: SelectionToolParams) {
   const isPainting = useRef(false);
   const localMask = useRef<ReturnType<typeof createEmptyMask> | null>(null);
   const [previewMask, setPreviewMask] = useState<MaybeSelectionMask>(null);
 
   const paint = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!canvasRef.current || !localMask.current) return;
-    const pt = getCanvasPoint(e, canvasRef.current);
+    const pt = getCanvasPoint(e, canvasRef.current, zoom);
     paintBrushMask(localMask.current, pt.x, pt.y, BRUSH_RADIUS);
-    // Shallow copy data to trigger re-render
     setPreviewMask({
       data: localMask.current.data.slice(),
       width: localMask.current.width,

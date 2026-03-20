@@ -1,14 +1,6 @@
 import type React from 'react';
 
-export type ActiveTool =
-  | 'none'
-  | 'crop'
-  | 'colorPick'
-  | 'pointErase'
-  | 'rectSelect'
-  | 'ellipseSelect'
-  | 'lassoSelect'
-  | 'paintSelect';
+export type { ActiveTool } from './tool';
 
 export type SelectionMode = 'replace' | 'add' | 'subtract';
 
@@ -27,6 +19,8 @@ export interface SelectionToolParams {
   imageSize: { width: number; height: number };
   selectionMode: SelectionMode;
   onCommit: (mask: SelectionMask) => void;
+  /** Zoom level applied via CSS transform (default: 1) */
+  zoom?: number;
 }
 
 export interface ToolMouseHandlers {

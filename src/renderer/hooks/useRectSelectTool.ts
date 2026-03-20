@@ -3,14 +3,14 @@ import type { SelectionToolParams, CanvasRect } from '../types/selection';
 import { createEmptyMask, fillRectMask, normalizeRect, clampRect } from '../utils/maskUtils';
 import { getCanvasPoint } from '../utils/canvasUtils';
 
-export function useRectSelectTool({ isActive, canvasRef, imageSize, onCommit }: SelectionToolParams) {
+export function useRectSelectTool({ isActive, canvasRef, imageSize, onCommit, zoom = 1 }: SelectionToolParams) {
   const isDragging = useRef(false);
   const startPoint = useRef<{ x: number; y: number } | null>(null);
   const [previewRect, setPreviewRect] = useState<CanvasRect | null>(null);
 
   const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isActive || !canvasRef.current) return;
-    const pt = getCanvasPoint(e, canvasRef.current);
+    const pt = getCanvasPoint(e, canvasRef.current, zoom);
     isDragging.current = true;
     startPoint.current = pt;
     setPreviewRect({ x: pt.x, y: pt.y, width: 0, height: 0 });
@@ -18,7 +18,7 @@ export function useRectSelectTool({ isActive, canvasRef, imageSize, onCommit }: 
 
   const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isActive || !isDragging.current || !startPoint.current || !canvasRef.current) return;
-    const pt = getCanvasPoint(e, canvasRef.current);
+    const pt = getCanvasPoint(e, canvasRef.current, zoom);
     setPreviewRect(normalizeRect(startPoint.current, pt));
   };
 
